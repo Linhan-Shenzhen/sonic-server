@@ -21,20 +21,19 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import org.cloud.sonic.controller.mapper.PublicStepsMapper;
-import org.cloud.sonic.controller.mapper.TestCasesMapper;
-import org.cloud.sonic.controller.mapper.TestSuitesTestCasesMapper;
+import org.cloud.sonic.controller.mapper.*;
+import org.cloud.sonic.controller.models.base.CommentPage;
 import org.cloud.sonic.controller.models.domain.*;
+import org.cloud.sonic.controller.models.dto.PublicStepsAndStepsIdDTO;
 import org.cloud.sonic.controller.models.dto.StepsDTO;
-import org.cloud.sonic.controller.services.GlobalParamsService;
-import org.cloud.sonic.controller.services.StepsService;
-import org.cloud.sonic.controller.services.TestCasesService;
-import org.cloud.sonic.controller.services.TestSuitesService;
+import org.cloud.sonic.controller.models.dto.TestCasesDTO;
+import org.cloud.sonic.controller.services.*;
 import org.cloud.sonic.controller.services.impl.base.SonicServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -47,28 +46,53 @@ import java.util.stream.Collectors;
 @Service
 public class TestCasesServiceImpl extends SonicServiceImpl<TestCasesMapper, TestCases> implements TestCasesService {
 
-    @Autowired private StepsService stepsService;
-    @Autowired private PublicStepsMapper publicStepsMapper;
-    @Autowired private GlobalParamsService globalParamsService;
-    @Autowired private TestSuitesTestCasesMapper testSuitesTestCasesMapper;
-    @Autowired private TestSuitesService testSuitesService;
+    @Autowired
+    private StepsService stepsService;
+    @Autowired
+    private StepsElementsMapper stepsElementsMapper;
+    @Autowired
+    private GlobalParamsService globalParamsService;
+    @Autowired
+    private TestSuitesTestCasesMapper testSuitesTestCasesMapper;
+    @Autowired
+    private TestSuitesService testSuitesService;
+    @Autowired
+    private TestCasesMapper testCasesMapper;
+    @Autowired
+    private StepsMapper stepsMapper;
+    @Autowired
+    private ElementsService elementsService;
+    @Autowired
+    private ModulesMapper modulesMapper;
 
     @Override
-    public Page<TestCases> findAll(int projectId, int platform, String name, Page<TestCases> pageable) {
+    public CommentPage<TestCasesDTO> findAll(int projectId, int platform, String name, List<Integer> moduleIds, Page<TestCases> pageable) {
 
         LambdaQueryChainWrapper<TestCases> lambdaQuery = lambdaQuery();
-        if (projectId != 0) {
-            lambdaQuery.eq(TestCases::getProjectId, projectId);
-        }
-        if (platform != 0) {
-            lambdaQuery.eq(TestCases::getPlatform, platform);
-        }
-        if (name != null && name.length() > 0) {
-            lambdaQuery.like(TestCases::getName, name);
-        }
 
-        return lambdaQuery.orderByDesc(TestCases::getEditTime)
-                .page(pageable);
+        lambdaQuery.eq(projectId != 0, TestCases::getProjectId, projectId)
+                .eq(platform != 0, TestCases::getPlatform, platform)
+                .in(moduleIds != null && moduleIds.size() > 0, TestCases::getModuleId, moduleIds)
+                .like(!StringUtils.isEmpty(name), TestCases::getName, name)
+                .orderByDesc(TestCases::getEditTime);
+
+        //写入对应模块信息
+        Page<TestCases> page = lambdaQuery.page(pageable);
+        List<TestCasesDTO> testCasesDTOS = page.getRecords()
+                .stream().map(e -> findCaseDetail(e)).collect(Collectors.toList());
+
+        return CommentPage.convertFrom(page, testCasesDTOS);
+    }
+
+    @Transactional
+    public TestCasesDTO findCaseDetail(TestCases testCases) {
+        if (testCases.getModuleId() != null && testCases.getModuleId() != 0) {
+            Modules modules = modulesMapper.selectById(testCases.getModuleId());
+            if (modules != null) {
+                return testCases.convertTo().setModulesDTO(modules.convertTo());
+            }
+        }
+        return testCases.convertTo();
     }
 
     @Override
@@ -102,8 +126,9 @@ public class TestCasesServiceImpl extends SonicServiceImpl<TestCasesMapper, Test
     }
 
     @Override
-    public TestCases findById(int id) {
-        return baseMapper.selectById(id);
+    public TestCasesDTO findById(int id) {
+        TestCases testCases = baseMapper.selectById(id);
+        return findCaseDetail(testCases);
     }
 
     @Transactional
@@ -168,4 +193,89 @@ public class TestCasesServiceImpl extends SonicServiceImpl<TestCasesMapper, Test
         Set<Integer> caseIdSet = steps.stream().map(Steps::getCaseId).collect(Collectors.toSet());
         return lambdaQuery().in(TestCases::getId, caseIdSet).list();
     }
+
+    /**
+     * 测试用例的复制
+     * 基本原理和公共步骤相同，不需要关联publicStep+step
+     * 只需要关联了step+ele。
+     *
+     * @param oldId 需要复制的id
+     * @return 返回成功
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean copyTestById(int oldId) {
+        //插入新的testCase
+        TestCases oldTestCases = testCasesMapper.selectById(oldId);
+        save(oldTestCases.setId(null).setName(oldTestCases.getName() + "_copy"));
+
+        //查找旧的case Step&&对应的ele
+        LambdaQueryWrapper<Steps> queryWrapper = new LambdaQueryWrapper<>();
+        List<Steps> oldStepsList = stepsMapper.selectList(
+                queryWrapper.eq(Steps::getCaseId, oldId).orderByAsc(Steps::getSort));
+        List<StepsDTO> stepsDTO = new ArrayList<>();
+        for (Steps steps : oldStepsList) {
+            stepsDTO.add(steps.convertTo());
+
+        }
+        List<StepsDTO> stepsCopyDTOS = stepsService.handleSteps(stepsDTO);
+
+        //需要插入的步骤记录
+        List<PublicStepsAndStepsIdDTO> needCopySteps = stepsService.stepAndIndex(stepsCopyDTOS);
+
+        //插入新的步骤
+        int n = 1;
+        for (StepsDTO steps : stepsCopyDTOS) {
+            Steps step = steps.convertTo();
+
+            if (step.getParentId() != 0) {
+                //如果有关联的父亲步骤， 就计算插入过得父亲ID 写入parentId
+                Integer fatherIdIndex = 0;
+                Integer idIndex = 0;
+                //计算子步骤和父步骤的相对间距
+                for (PublicStepsAndStepsIdDTO stepsIdDTO : needCopySteps) {
+                    if (stepsIdDTO.getStepsDTO().convertTo().equals(step)) {
+                        fatherIdIndex = stepsIdDTO.getIndex();
+                    }
+                    if (stepsIdDTO.getStepsDTO().convertTo().equals(stepsMapper.selectById(step.getParentId()))) {
+                        idIndex = stepsIdDTO.getIndex();
+                    }
+                }
+                step.setId(null).setParentId(fatherIdIndex).setCaseId(oldTestCases.getId()).setSort(stepsMapper.findMaxSort() + n);
+                stepsMapper.insert(step.setCaseId(oldTestCases.getId()));
+                //修改父步骤Id
+                step.setParentId(step.getId() - (fatherIdIndex - idIndex));
+                stepsMapper.updateById(step);
+                n++;
+                //关联steps和elId
+                if (steps.getElements() != null) {
+                    elementsService.newStepBeLinkedEle(steps, step);
+                }
+                continue;
+            }
+            step.setId(null).setCaseId(oldTestCases.getId()).setSort(stepsMapper.findMaxSort() + n);
+            stepsMapper.insert(step);
+            //关联steps和elId
+            if (steps.getElements() != null) {
+                elementsService.newStepBeLinkedEle(steps, step);
+            }
+            n++;
+        }
+        return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Boolean updateTestCaseModuleByModuleId(Integer module) {
+        List<TestCases> testCasesList = lambdaQuery().eq(TestCases::getModuleId, module).list();
+        if (testCasesList == null) {
+            return true;
+        }
+
+        for (TestCases testCases : testCasesList) {
+            save(testCases.setModuleId(0));
+        }
+        return true;
+    }
 }
+

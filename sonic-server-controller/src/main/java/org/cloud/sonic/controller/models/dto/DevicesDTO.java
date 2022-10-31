@@ -44,6 +44,9 @@ public class DevicesDTO implements Serializable, TypeConverter<DevicesDTO, Devic
     @ApiModelProperty(value = "设备系统", example = "1")
     Integer platform;
 
+    @ApiModelProperty(value = "鸿蒙类型", example = "0")
+    Integer isHm;
+
     @ApiModelProperty(value = "分辨率", example = "1080x1920")
     String size;
 
@@ -79,12 +82,6 @@ public class DevicesDTO implements Serializable, TypeConverter<DevicesDTO, Devic
 
     @ApiModelProperty(value = "中文设备", example = "荣耀全网通")
     String chiName;
-
-    @ApiModelProperty(value = "Hub接口", example = "1")
-    Integer position;
-
-    @ApiModelProperty(value = "Hub档位", example = "1")
-    Integer gear;
 
     public float getTemperature() {
         if (temperature == null) {

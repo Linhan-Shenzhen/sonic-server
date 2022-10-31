@@ -24,7 +24,6 @@ import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapp
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.cloud.sonic.common.http.RespEnum;
 import org.cloud.sonic.common.http.RespModel;
-import org.cloud.sonic.controller.models.interfaces.AgentStatus;
 import org.cloud.sonic.common.tools.BeanTool;
 import org.cloud.sonic.controller.mapper.*;
 import org.cloud.sonic.controller.models.base.CommentPage;
@@ -34,16 +33,21 @@ import org.cloud.sonic.controller.models.dto.*;
 import org.cloud.sonic.controller.models.enums.ConditionEnum;
 import org.cloud.sonic.controller.models.interfaces.CoverType;
 import org.cloud.sonic.controller.models.interfaces.DeviceStatus;
+import org.cloud.sonic.controller.models.interfaces.PlatformType;
 import org.cloud.sonic.controller.models.interfaces.ResultStatus;
-import org.cloud.sonic.controller.netty.NettyServer;
 import org.cloud.sonic.controller.services.*;
 import org.cloud.sonic.controller.services.impl.base.SonicServiceImpl;
+import org.cloud.sonic.controller.tools.BytesTool;
+import org.cloud.sonic.controller.transport.TransportWorker;
+import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.CollectionUtils;
 import org.springframework.util.ObjectUtils;
 
+import javax.websocket.Session;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -53,7 +57,7 @@ import java.util.stream.Collectors;
  * @date 2021/8/20 17:51
  */
 @Service
-public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, TestSuites> implements TestSuitesService {
+public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, TestSuites> implements TestSuitesService, ApplicationContextAware {
 
     @Autowired
     private TestCasesMapper testCasesMapper;
@@ -73,6 +77,12 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
     private TestSuitesDevicesMapper testSuitesDevicesMapper;
     @Autowired
     private AgentsService agentsService;
+    @Autowired
+    private PackagesService packagesService;
+
+    private Map<Integer, CoverHandler> coverHandlerMap;
+
+    private ApplicationContext applicationContext;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -131,94 +141,7 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
                 gp.put(g.getParamsKey(), g.getParamsValue());
             }
         }
-        int deviceIndex = 0;
-        if (testSuitesDTO.getCover() == CoverType.CASE) {
-            List<JSONObject> suiteDetail = new ArrayList<>();
-            Set<Integer> agentIds = new HashSet<>();
-            for (TestCasesDTO testCases : testSuitesDTO.getTestCases()) {
-                JSONObject suite = new JSONObject();
-                List<JSONObject> steps = new ArrayList<>();
-                List<StepsDTO> stepsList = stepsService.findByCaseIdOrderBySort(testCases.getId());
-                for (StepsDTO s : stepsList) {
-                    steps.add(getStep(s));
-                }
-                suite.put("steps", steps);
-                suite.put("cid", testCases.getId());
-                Devices devices = devicesList.get(deviceIndex);
-                // 不要用List.of，它的实现ImmutableCollections无法被序列化
-                suite.put("device", new ArrayList<>() {{
-                    add(devices);
-                }});
-                if (deviceIndex == devicesList.size() - 1) {
-                    deviceIndex = 0;
-                } else {
-                    deviceIndex++;
-                }
-                //如果该字段的多参数数组还有，放入对象。否则去掉字段
-                for (String k : valueMap.keySet()) {
-                    if (valueMap.get(k).size() > 0) {
-                        String v = valueMap.get(k).get(0);
-                        gp.put(k, v);
-                        valueMap.get(k).remove(0);
-                    } else {
-                        valueMap.remove(k);
-                    }
-                }
-                suite.put("gp", gp);
-                suite.put("rid", results.getId());
-                agentIds.add(devices.getAgentId());
-                suiteDetail.add(suite);
-            }
-            JSONObject result = new JSONObject();
-            result.put("msg", "suite");
-            result.put("pf", testSuitesDTO.getPlatform());
-            result.put("cases", suiteDetail);
-            for (Integer id : agentIds) {
-                if (NettyServer.getMap().get(id) != null) {
-                    NettyServer.getMap().get(id).writeAndFlush(result.toJSONString());
-                }
-            }
-        }
-        if (testSuitesDTO.getCover() == CoverType.DEVICE) {
-            List<JSONObject> suiteDetail = new ArrayList<>();
-            Set<Integer> agentIds = new HashSet<>();
-            for (TestCasesDTO testCases : testSuitesDTO.getTestCases()) {
-                JSONObject suite = new JSONObject();
-                List<JSONObject> steps = new ArrayList<>();
-                List<StepsDTO> stepsList = stepsService.findByCaseIdOrderBySort(testCases.getId());
-                for (StepsDTO s : stepsList) {
-                    steps.add(getStep(s));
-                }
-                for (Devices devices : devicesList) {
-                    agentIds.add(devices.getAgentId());
-                }
-                suite.put("steps", steps);
-                suite.put("cid", testCases.getId());
-                suite.put("device", devicesList);
-                //如果该字段的多参数数组还有，放入对象。否则去掉字段
-                for (String k : valueMap.keySet()) {
-                    if (valueMap.get(k).size() > 0) {
-                        String v = valueMap.get(k).get(0);
-                        gp.put(k, v);
-                        valueMap.get(k).remove(0);
-                    } else {
-                        valueMap.remove(k);
-                    }
-                }
-                suite.put("gp", gp);
-                suite.put("rid", results.getId());
-                suiteDetail.add(suite);
-            }
-            JSONObject result = new JSONObject();
-            result.put("msg", "suite");
-            result.put("pf", testSuitesDTO.getPlatform());
-            result.put("cases", suiteDetail);
-            for (Integer id : agentIds) {
-                if (NettyServer.getMap().get(id) != null) {
-                    NettyServer.getMap().get(id).writeAndFlush(result.toJSONString());
-                }
-            }
-        }
+        coverHandlerMap.get(testSuitesDTO.getCover()).handlerSuite(testSuitesDTO, gp, devicesList,  valueMap, results);
         return new RespModel<>(RespEnum.HANDLE_OK);
     }
 
@@ -292,9 +215,7 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
             result.put("pf", testSuitesDTO.getPlatform());
             result.put("cases", suiteDetail);
             for (Integer id : agentIds) {
-                if (NettyServer.getMap().get(id) != null) {
-                    NettyServer.getMap().get(id).writeAndFlush(result.toJSONString());
-                }
+                TransportWorker.send(id, result);
             }
         }
         if (testSuitesDTO.getCover() == CoverType.DEVICE) {
@@ -315,9 +236,7 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
             result.put("pf", testSuitesDTO.getPlatform());
             result.put("cases", suiteDetail);
             for (Integer id : agentIds) {
-                if (NettyServer.getMap().get(id) != null) {
-                    NettyServer.getMap().get(id).writeAndFlush(result.toJSONString());
-                }
+                TransportWorker.send(id, result);
             }
         }
         return new RespModel<>(RespEnum.HANDLE_OK);
@@ -358,6 +277,17 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
     @Override
     public JSONObject getStep(StepsDTO steps) {
         JSONObject step = new JSONObject();
+        if (steps.getStepType().equals("install") && steps.getContent().equals("2")) {
+            String plat = "unknown";
+            if (steps.getPlatform() == PlatformType.ANDROID) {
+                plat = "Android";
+            }
+            if (steps.getPlatform() == PlatformType.IOS) {
+                plat = "iOS";
+            }
+            steps.setText(packagesService.findOne(steps.getProjectId(), steps.getText(), plat));
+        }
+
         if (steps.getStepType().equals("publicStep")) {
             PublicStepsDTO publicStepsDTO = publicStepsService.findById(Integer.parseInt(steps.getText()));
             if (publicStepsDTO != null) {
@@ -393,6 +323,16 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
                         // 添加转换后的公共步骤
                         childStepJsonObjs.add(childStepJsonObj);
                     }
+                } else if (childStep.getStepType().equals("install") && childStep.getContent().equals("2")) {
+                    String plat = "unknown";
+                    if (childStep.getPlatform() == PlatformType.ANDROID) {
+                        plat = "Android";
+                    }
+                    if (childStep.getPlatform() == PlatformType.IOS) {
+                        plat = "iOS";
+                    }
+                    childStep.setText(packagesService.findOne(childStep.getProjectId(), childStep.getText(), plat));
+                    childStepJsonObjs.add(childStep);
                 } else {
                     // 如果不是公共步骤，则直接添加
                     childStepJsonObjs.add(childStep);
@@ -493,5 +433,151 @@ public class TestSuitesServiceImpl extends SonicServiceImpl<TestSuitesMapper, Te
     @Override
     public List<TestSuites> listTestSuitesByTestCasesId(int testCasesId) {
         return testSuitesTestCasesMapper.listTestSuitesByTestCasesId(testCasesId);
+    }
+
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
+        initCoverHandlerMap();
+    }
+
+    private void initCoverHandlerMap() {
+        Map<String, CoverHandler> coverHandlerBeans = applicationContext.getBeansOfType(CoverHandler.class);
+        coverHandlerMap = new HashMap<>();
+        if(coverHandlerBeans != null) {
+            for(CoverHandler coverHandler : coverHandlerBeans.values()) {
+                coverHandlerMap.put(coverHandler.cover(), coverHandler);
+            }
+        }
+    }
+
+    private JSONObject packageTestCase(Devices devices, TestCasesDTO testCases,
+                JSONObject gp, Results results, StepsService stepsService) {
+        JSONObject testCase = new JSONObject();
+        List<JSONObject> steps = new ArrayList<>();
+        List<StepsDTO> stepsList = stepsService.findByCaseIdOrderBySort(testCases.getId());
+        for (StepsDTO s : stepsList) {
+            steps.add(getStep(s));
+        }
+        testCase.put("steps", steps);
+        testCase.put("cid", testCases.getId());
+        testCase.put("device", new ArrayList<>() {{
+            add(devices);
+        }});
+        testCase.put("gp", gp);
+        testCase.put("rid", results.getId());
+        return testCase;
+    }
+
+    /**
+     * 更新全局变量，如果变量为多值以设备维度进行分配
+     * 当设备数量大于变量数量时，前面设备按顺序分配变
+     * 量，后面设备统一取变量的最后一个值。
+     * @param gp
+     * @param valueMap
+     * @return
+     */
+    private JSONObject refreshGlobalParams(JSONObject gp, Map<String, List<String>> valueMap) {
+        boolean needClone = true;
+        for (String k : valueMap.keySet()) {
+            if (valueMap.get(k).size() > 0) {
+                String v = valueMap.get(k).get(0);
+                if(needClone && gp.get(k) != null) {
+                    gp = gp.clone();
+                    needClone = false;
+                }
+                gp.put(k, v);
+                valueMap.get(k).remove(0);
+            } else {
+                valueMap.remove(k);
+            }
+        }
+        return gp;
+    }
+
+    interface CoverHandler {
+        void handlerSuite(TestSuitesDTO testSuitesDTO, JSONObject gp, List<Devices> devicesList,
+                          Map<String,List<String>> valueMap, Results results);
+        Integer cover();
+    }
+
+    /**
+     * 用例覆盖处理器
+     */
+    @Service
+    class CaseCoverHandler implements CoverHandler {
+        @Autowired
+        private StepsService stepsService;
+
+        @Override
+        public void handlerSuite(TestSuitesDTO testSuitesDTO, JSONObject gp,
+                                 List<Devices> devicesList, Map<String, List<String>> valueMap, Results results) {
+            List<JSONObject> suiteDetailList = new ArrayList<>();
+            for (int i = 0; i < devicesList.size(); i ++) {
+                Devices devices = devicesList.get(i);
+                gp = refreshGlobalParams(gp, valueMap);
+                for (int j = i; j < testSuitesDTO.getTestCases().size(); j += devicesList.size()) {
+                    TestCasesDTO testCases = testSuitesDTO.getTestCases().get(j);
+                    suiteDetailList.add(packageTestCase(devices, testCases, gp, results, this.stepsService));
+                }
+                send(devices.getAgentId(), testSuitesDTO.getPlatform(), suiteDetailList);
+                suiteDetailList.clear();
+            }
+        }
+
+        @Override
+        public Integer cover() {
+            return CoverType.CASE;
+        }
+    }
+
+    /**
+     * 设备覆盖处理器
+     */
+    @Service
+    class DeviceCoverHandler implements CoverHandler {
+        @Autowired
+        private StepsService stepsService;
+
+        @Override
+        public void handlerSuite(TestSuitesDTO testSuitesDTO, JSONObject gp,
+                                 List<Devices> devicesList, Map<String, List<String>> valueMap, Results results) {
+            List<JSONObject> suiteDetailList = null;
+            for (Devices devices : devicesList) {
+                gp = refreshGlobalParams(gp, valueMap);
+                if(suiteDetailList == null) {
+                    suiteDetailList = new ArrayList<>();
+                    for (TestCasesDTO testCases : testSuitesDTO.getTestCases()) {
+                        suiteDetailList.add(packageTestCase(devices, testCases, gp, results, this.stepsService));
+                    }
+                } else {
+                    for (JSONObject suiteDetail : suiteDetailList) {
+                        suiteDetail.put("device", new ArrayList<>() {{
+                            add(devices);
+                        }});
+                        suiteDetail.put("gp", gp);
+                    }
+                }
+                send(devices.getAgentId(), testSuitesDTO.getPlatform(), suiteDetailList);
+            }
+        }
+
+        @Override
+        public Integer cover() {
+            return CoverType.DEVICE;
+        }
+    }
+
+    /**
+     * 封装数据并发送执行机
+     * @param agentId
+     * @param platform
+     * @param suiteDetailList
+     */
+    private void send(Integer agentId, Integer platform, List<JSONObject> suiteDetailList) {
+        JSONObject result = new JSONObject();
+        result.put("msg", "suite");
+        result.put("pf", platform);
+        result.put("cases", suiteDetailList);
+        TransportWorker.send(agentId, result);
     }
 }

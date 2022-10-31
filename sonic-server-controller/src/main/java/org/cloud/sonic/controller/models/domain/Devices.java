@@ -87,6 +87,10 @@ public class Devices implements Serializable, TypeConverter<Devices, DevicesDTO>
     private Integer platform;
 
     @TableField
+    @Column(value = "is_hm", isNull = false, comment = "是否为鸿蒙类型 1：鸿蒙 0：非鸿蒙", defaultValue = "0")
+    private Integer isHm;
+
+    @TableField
     @Column(comment = "设备分辨率", defaultValue = "")
     private String size;
 
@@ -123,20 +127,13 @@ public class Devices implements Serializable, TypeConverter<Devices, DevicesDTO>
     @Column(defaultValue = "0", comment = "设备电量")
     Integer level;
 
-    @TableField
-    @Column(defaultValue = "0", comment = "Hub接口")
-    Integer position;
-
-    @TableField
-    @Column(defaultValue = "0", comment = "Hub档位")
-    Integer gear;
-
     public static Devices newDeletedDevice(int id) {
         String tips = "Device does not exist.";
         return new Devices()
                 .setAgentId(0)
                 .setStatus("DISCONNECTED")
                 .setPlatform(0)
+                .setIsHm(0)
                 .setId(id)
                 .setVersion("unknown")
                 .setSize("unknown")
@@ -150,8 +147,6 @@ public class Devices implements Serializable, TypeConverter<Devices, DevicesDTO>
                 .setUser(tips)
                 .setUdId(tips)
                 .setTemperature(0)
-                .setGear(0)
-                .setPosition(0)
                 .setLevel(0);
     }
 }

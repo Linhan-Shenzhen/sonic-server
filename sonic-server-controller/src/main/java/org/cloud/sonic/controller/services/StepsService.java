@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.cloud.sonic.controller.models.base.CommentPage;
 import org.cloud.sonic.controller.models.domain.Steps;
+import org.cloud.sonic.controller.models.dto.PublicStepsAndStepsIdDTO;
 import org.cloud.sonic.controller.models.dto.StepsDTO;
 import org.cloud.sonic.controller.models.http.StepSort;
 
@@ -19,6 +20,12 @@ public interface StepsService extends IService<Steps> {
 
     List<StepsDTO> handleSteps(List<StepsDTO> stepsDTOS);
 
+    /**
+     * 获取每个step下的childSteps 组装成一个list返回
+     * @param stepsDTOS 步骤集合
+     * @return 包含所有子步骤的集合
+     */
+    List<StepsDTO> getChildSteps(List<StepsDTO> stepsDTOS);
     /**
      * 如果步骤是条件步骤，且子条件也可能是条件步骤，则递归填充条件步骤的子步骤，且所有步骤都会填充 {@link StepsDTO#elements} 属性
      *
@@ -46,4 +53,20 @@ public interface StepsService extends IService<Steps> {
      * 获取公共步骤里面的步骤
      */
     List<StepsDTO> listByPublicStepsId(int publicStepsId);
+
+    /**
+     * 公共步骤信息页，搜索步骤
+     * @param projectId
+     * @param platform
+     * @param page              页码
+     * @param pageSize          页面大小
+     * @param searchContent     搜索的文案；elements表中名字， steps表中的Content
+     * @return                  返回Steps表中步骤；
+     */
+    CommentPage<StepsDTO> searchFindByProjectIdAndPlatform(int projectId, int platform, int page ,int pageSize,
+                                                           String searchContent);
+
+    Boolean copyStepsIdByCase(Integer stepId);
+
+    List<PublicStepsAndStepsIdDTO> stepAndIndex(List<StepsDTO> needAllCopySteps);
 }

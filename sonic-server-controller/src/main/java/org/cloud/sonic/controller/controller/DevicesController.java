@@ -55,18 +55,6 @@ public class DevicesController {
         }
     }
 
-    @PutMapping("/updateDevicesUser")
-    public RespModel<String> updateDevicesUser(@RequestBody JSONObject jsonObject) {
-        devicesService.updateDevicesUser(jsonObject);
-        return new RespModel<>(RespEnum.UPDATE_OK);
-    }
-
-    @PutMapping("/refreshDevicesBattery")
-    public RespModel<String> refreshDevicesBattery(@RequestBody JSONObject jsonObject) {
-        devicesService.refreshDevicesBattery(jsonObject);
-        return new RespModel<>(RespEnum.UPDATE_OK);
-    }
-
     @WebAspect
     @ApiOperation(value = "修改设备图片", notes = "修改对应设备id的图片")
     @PutMapping("/updateImg")
@@ -80,6 +68,7 @@ public class DevicesController {
     @ApiImplicitParams(value = {
             @ApiImplicitParam(name = "androidVersion[]", value = "安卓版本", dataTypeClass = String.class),
             @ApiImplicitParam(name = "iOSVersion[]", value = "iOS版本", dataTypeClass = String.class),
+            @ApiImplicitParam(name = "hmVersion[]", value = "鸿蒙版本", dataTypeClass = String.class),
             @ApiImplicitParam(name = "manufacturer[]", value = "制造商", dataTypeClass = String.class),
             @ApiImplicitParam(name = "cpu[]", value = "cpu类型", dataTypeClass = String.class),
             @ApiImplicitParam(name = "size[]", value = "屏幕尺寸", dataTypeClass = String.class),
@@ -92,6 +81,7 @@ public class DevicesController {
     @GetMapping("/list")
     public RespModel<CommentPage<Devices>> findAll(@RequestParam(name = "androidVersion[]", required = false) List<String> androidVersion,
                                                    @RequestParam(name = "iOSVersion[]", required = false) List<String> iOSVersion,
+                                                   @RequestParam(name = "hmVersion[]" , required = false) List<String> hmVersion,
                                                    @RequestParam(name = "manufacturer[]", required = false) List<String> manufacturer,
                                                    @RequestParam(name = "cpu[]", required = false) List<String> cpu,
                                                    @RequestParam(name = "size[]", required = false) List<String> size,
@@ -104,7 +94,7 @@ public class DevicesController {
         return new RespModel<>(
                 RespEnum.SEARCH_OK,
                 CommentPage.convertFrom(
-                        devicesService.findAll(iOSVersion, androidVersion, manufacturer, cpu, size,
+                        devicesService.findAll(iOSVersion, androidVersion,hmVersion, manufacturer, cpu, size,
                                 agentId, status, deviceInfo, pageable)
                 )
         );
@@ -149,13 +139,7 @@ public class DevicesController {
 //    }
 
     @WebAspect
-    @PutMapping("/deviceStatus")
-    public RespModel<String> deviceStatus(@RequestBody JSONObject jsonObject) {
-        devicesService.deviceStatus(jsonObject);
-        return new RespModel<>(RespEnum.UPDATE_OK);
-    }
-
-    @WebAspect
+    @ApiOperation(value = "设备信息", notes = "获取指定设备信息")
     @GetMapping
     public RespModel<Devices> findById(@RequestParam(name = "id") int id) {
         Devices devices = devicesService.findById(id);

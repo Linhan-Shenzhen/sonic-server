@@ -136,4 +136,35 @@ public class StepsController {
             return new RespModel<>(RespEnum.ID_NOT_FOUND);
         }
     }
+    @WebAspect
+    @ApiOperation(value = "搜索查找步骤列表", notes = "查找对应用例id下的步骤列表（分页）")
+    @ApiImplicitParams(value = {
+            @ApiImplicitParam(name = "projectId", value = "项目id", dataTypeClass = Integer.class),
+            @ApiImplicitParam(name = "platform", value = "平台", dataTypeClass = Integer.class),
+            @ApiImplicitParam(name = "page", value = "页码", dataTypeClass = Integer.class),
+            @ApiImplicitParam(name = "pageSize", value = "页数据大小", dataTypeClass = Integer.class),
+            @ApiImplicitParam(name = "searchContent", value = "搜索文本", dataTypeClass = String.class)
+    })
+    @GetMapping("/search/list")
+    public RespModel<CommentPage<StepsDTO>> searchFindAll(@RequestParam(name = "projectId") int projectId,
+                                                          @RequestParam(name = "platform") int platform,
+                                                          @RequestParam(name = "page") int page,
+                                                          @RequestParam(name = "pageSize") int pageSize,
+                                                          @RequestParam(name="searchContent")String searchContent) {
+        return new RespModel<>(RespEnum.SEARCH_OK, stepsService.searchFindByProjectIdAndPlatform(projectId, platform,
+                page,pageSize,searchContent));
+    }
+
+    @WebAspect
+    @ApiOperation(value = "复制步骤", notes = "测试用例复制其中一个步骤")
+    @ApiImplicitParams(value = {
+            @ApiImplicitParam(name = "id", value = "用例中需要被复制步骤Id", dataTypeClass = Integer.class),
+    })
+    @GetMapping("/copy/steps")
+    public RespModel<String> copyStepsIdByCase(@RequestParam(name = "id") int stepId) {
+        stepsService.copyStepsIdByCase(stepId);
+
+        return new RespModel<>(RespEnum.COPY_OK);
+    }
+
 }
